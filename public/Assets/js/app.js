@@ -14,6 +14,7 @@ var AppProcess = (() => {
   };
   var video_st = video_states.None;
   var videoCamTrack;
+  var rtp_vid_senders = [];
 
   var serverProcess = null;
 
@@ -35,11 +36,15 @@ var AppProcess = (() => {
       }
       if (isAudioMuted) {
         audio.enabled = true;
-        $(this).html("<span class='material-icons'>mic</span>");
+        $(this).html(
+          "<span class='material-icons' style='width: 100%;'>mic</span>"
+        );
         updateMediaSender(audio, rtp_aud_sender);
       } else {
         audio.enabled = false;
-        $(this).html("<span class='material-icons'>mic-off</span>");
+        $(this).html(
+          "<span class='material-icons' style='width: 100%;'>mic-off</span>"
+        );
         removeMediaSender(rtp_aud_sender);
       }
       isAudioMuted = !isAudioMuted;
@@ -59,7 +64,77 @@ var AppProcess = (() => {
       }
     });
   }
+
+  async function loadAudio() {
+    try {
+      var astream = await navigator.mediaDevices.getUserMedia({
+        video: false,
+        audio: true,
+      });
+      audio = astream.getAudioTracks()[0];
+      audio.enabled = false;
+    } catch (error) {
+      console.log(error);
+    }
+  }
+
+  function connection_status(connection) {
+    if (
+      connection &&
+      (connection.connectionState == "new" ||
+        connection.connectionState === "connecting" ||
+        connection.connectionState === "connected")
+    ) {
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  async function updateMediaSenders(track, rtp_senders) {
+    for (var con_id in peers_connection_ids) {
+      if (connection_status(peers_connection[con_id])) {
+        if (rtp_senders[con_id] && rtp_senders[con_id].track) {
+          rtp_senders[con_id].replaceTrack(track);
+        } else {
+          rtp_senders[con_id] = peers_connection[con_id].addTrack(track);
+        }
+      }
+    }
+  }
+
+  function removeMediaSenders(rtp_senders) {
+    for (var con_id in peers_connection_ids) {
+      if (rtp_senders[con_id] && connection_status(peers_connection[con_id])) {
+        peers_connection[con_id].removeTrack(rtp_senders[con_id]);
+        rtp_senders[con_id] = null;
+      }
+    }
+  }
+
+  function removeVideoStream(rtp_vid_senders) {
+    if (videoCamTrack) {
+      videoCamTrack.stop();
+      videoCamTrack = null;
+      local_div.srcObject = null;
+      removeMediaSenders(rtp_vid_senders);
+    }
+  }
+
   async function videoProcess(newVideoState) {
+    if (newVideoState === video_states.None) {
+      $("#videoCamOnOff").html(
+        "<span class='material-icons' style='width: 100%;'>videocam_off</span>"
+      );
+      video_st = newVideoState;
+      removeVideoStream(rtp_vid_senders);
+      return;
+    }
+    if (newVideoState === video_states.Camera) {
+      $("#videoCamOnOff").html(
+        "<span class='material-icons' style='width: 100%;'>videocam_on</span>"
+      );
+    }
     try {
       var vstream = null;
       if (newVideoState === video_states.Camera) {
@@ -83,7 +158,7 @@ var AppProcess = (() => {
         videoCamTrack = vstream.getVideoTracks()[0];
         if (videoCamTrack) {
           local_div.srcObject = new MediaStream([videoCamTrack]);
-          alert("Video cam found");
+          updateMediaSenders(videoCamTrack, rtp_vid_senders);
         }
       }
     } catch (error) {
@@ -148,6 +223,16 @@ var AppProcess = (() => {
     };
     peers_connection_ids[connId] = connId;
     peers_connection[connId] = connection;
+
+    if (
+      video_st === video_states.Camera ||
+      video_st == video_states.ScreenShare
+    ) {
+      if (videoCamTrack) {
+        updateMediaSenders(videoCamtrack, rtp_vid_senders);
+      }
+    }
+
     return connection;
   }
 
@@ -232,7 +317,6 @@ var MyApp = (function () {
       if (socket.connected) {
         AppProcess.init(SDP_function, socket.id);
         if (user_id !== "" && mett_id !== "") {
-          console.log();
           socket.emit("userconnect", {
             displayName: user_id,
             meeting_id: mett_id,
@@ -242,7 +326,7 @@ var MyApp = (function () {
     });
 
     socket.on("inform_connection", (data) => {
-      addUser(data.other_user.id, data.connId);
+      addUser(data.other_users_id, data.connId);
       AppProcess.setNewConnection(data.connId);
     });
     socket.on("inform_me_about_other_user", (other_users) => {

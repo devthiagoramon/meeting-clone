@@ -11,7 +11,6 @@ app.use(express.static(path.join(__dirname, "")));
 var userConnections = [];
 
 io.on("connection", (socket) => {
-  console.log(socket.id)
   socket.on("userconnect", (obj) => {
     console.log("userconnect", obj.displayName, obj.meeting_id);
     var other_users = userConnections.filter(
