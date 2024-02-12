@@ -26,7 +26,7 @@ var AppProcess = (() => {
   }
 
   function eventProcess() {
-    $("#micMutUnMute").on("click", async () => {
+    $("#micMuteUnMute").on("click", async () => {
       if (!audio) {
         await loadAudio();
       }
@@ -39,13 +39,13 @@ var AppProcess = (() => {
         $(this).html(
           "<span class='material-icons' style='width: 100%;'>mic</span>"
         );
-        updateMediaSender(audio, rtp_aud_sender);
+        updateMediaSenders(audio, rtp_aud_sender);
       } else {
         audio.enabled = false;
         $(this).html(
           "<span class='material-icons' style='width: 100%;'>mic-off</span>"
         );
-        removeMediaSender(rtp_aud_sender);
+        removeMediaSenders(rtp_aud_sender);
       }
       isAudioMuted = !isAudioMuted;
     });
@@ -127,6 +127,10 @@ var AppProcess = (() => {
         "<span class='material-icons' style='width: 100%;'>videocam_off</span>"
       );
       video_st = newVideoState;
+      $("#ScreenShareOnOff").html(
+        "<span class='material-icons'>present_to_all</span><div>Present Now!</div>"
+      );
+
       removeVideoStream(rtp_vid_senders);
       return;
     }
@@ -153,6 +157,12 @@ var AppProcess = (() => {
           },
           audio: false,
         });
+        vstream.oninactive = (e) => {
+          removeVideoStream(rtp_vid_senders);
+          $("#ScreenShareOnOff").html(
+            "<span class='material-icons'>present_to_all</span><div>Present Now!</div>"
+          );
+        };
       }
       if (vstream && vstream.getVideoTracks().length > 0) {
         videoCamTrack = vstream.getVideoTracks()[0];
@@ -166,6 +176,22 @@ var AppProcess = (() => {
       return;
     }
     video_st = newVideoState;
+
+    if (newVideoState === video_states.Camera) {
+      $("#videoCamOnOff").html(
+        "<span class='material-icons' style='width: 100%;'>videocam</span>"
+      );
+      $("#ScreenShareOnOff").html(
+        "<span class='material-icons'>present_to_all</span><div>Present Now!</div>"
+      );
+    } else if (newVideoState === video_states.ScreenShare) {
+      $("#videoCamOnOff").html(
+        "<span class='material-icons' style='width: 100%;'>videocam_off</span>"
+      );
+      $("#ScreenShareOnOff").html(
+        "<span class='material-icons text-success'>present_to_all</span><div class='text-success'>Stop Present Now</div>"
+      );
+    }
   }
 
   var iceConfiguration = {
@@ -281,6 +307,26 @@ var AppProcess = (() => {
     }
   }
 
+  async function closeConnection(connId) {
+    peers_connection_ids[connId] = null;
+    if (peers_connection[connId]) {
+      peers_connection[connId].close();
+      peers_connection[connId] = null;
+    }
+    if(remote_aud_stream[connId]){
+      remote_aud_stream[connId].getTracks().forEach((t) => {
+        if(t.stop) t.stop()
+      })
+      remote_aud_stream[connId] = null
+    }
+    if(remote_vid_stream[connId]){
+      remote_vid_stream[connId].getTracks().forEach((t) => {
+        if(t.stop) t.stop()
+      })
+      remote_vid_stream[connId] = null
+    }
+  }
+
   return {
     setNewConnection: async (connId) => await setConnection(connId),
     init: async (SDP_function, my_connid) =>
@@ -288,6 +334,7 @@ var AppProcess = (() => {
     processClientFunction: async (data, from_connId) => {
       await SDPProcess(data, from_connId);
     },
+    closeConnectionCall: async (connId) => await closeConnection(connId),
   };
 })();
 
@@ -325,10 +372,18 @@ var MyApp = (function () {
       }
     });
 
+    socket.on("inform_other_about_disconnected_user", (data) => {
+
+      console.log(data)
+      $("#" + data.connId).remove();
+      AppProcess.closeConnectionCall(data.connId);
+    });
+
     socket.on("inform_connection", (data) => {
       addUser(data.other_users_id, data.connId);
       AppProcess.setNewConnection(data.connId);
     });
+
     socket.on("inform_me_about_other_user", (other_users) => {
       if (other_users) {
         other_users.forEach((other_user) => {
